@@ -19,7 +19,7 @@ export function analyzeTrades(trades: Trade[]): Flag[] {
 
   for (const [symbol, arr] of Object.entries(bySymbol)) {
     // simple rolling window for average qty
-    let window: number[] = [];
+    const window: number[] = [];
     let prevPrice: number | null = null;
 
     for (let i = 0; i < arr.length; i++) {
