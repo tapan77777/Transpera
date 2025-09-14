@@ -1,103 +1,260 @@
-import Image from "next/image";
+// src/app/page.tsx
+'use client';
 
-export default function Home() {
+import { useEffect, useMemo, useState } from 'react';
+
+type Trade = {
+  id: string;
+  clientId: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  qty: number;
+  price: number;
+  ts: number; // epoch ms
+};
+
+type Task = {
+  id: string;
+  title: string;
+  due: string; // ISO
+  status: 'PENDING' | 'COMPLETED' | 'OVERDUE';
+  category: 'REGULATORY' | 'RISK' | 'REPORTING' | string;
+};
+
+type Flag = {
+  tradeId: string;
+  type: 'HIGH_VOLUME' | 'PRICE_JUMP' | 'POTENTIAL_CIRCULARITY' | string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  message: string;
+};
+
+type Health = {
+  complianceScore: number;
+  surveillanceScore: number;
+  businessScore: number;
+  overall: number;
+  heatmap: number[]; // 14 values: 0=low,1=med,2=high
+};
+
+export default function Page() {
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [flags, setFlags] = useState<Flag[]>([]);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  async function refresh() {
+    setLoading(true);
+    const [tRes, cRes, sRes] = await Promise.all([
+      fetch('/api/trades', { cache: 'no-store' }),
+      fetch('/api/compliance', { cache: 'no-store' }),
+      fetch('/api/score', { cache: 'no-store' }),
+    ]);
+    setTrades(await tRes.json());
+    setTasks(await cRes.json());
+    const s = await sRes.json();
+    setFlags(s.flags);
+    setHealth(s.health);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function seed() {
+    await fetch('/api/seed', { method: 'POST' });
+    await refresh();
+  }
+
+  async function toggleTask(id: string, status: Task['status']) {
+    const next = status === 'COMPLETED' ? 'PENDING' : 'COMPLETED';
+    await fetch('/api/compliance', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: next }),
+    });
+    await refresh();
+  }
+
+  const counts = useMemo(
+    () => ({
+      pending: tasks.filter((t) => t.status === 'PENDING').length,
+      overdue: tasks.filter((t) => t.status === 'OVERDUE').length,
+      completed: tasks.filter((t) => t.status === 'COMPLETED').length,
+    }),
+    [tasks]
+  );
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="grid" style={{ gridTemplateColumns: '1fr', gap: 24 }}>
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <button className="btn" onClick={seed}>Seed Sample Data</button>
+        <button className="btn" onClick={refresh}>Refresh</button>
+        <a className="btn" href="/api/report">Download PDF</a>
+      </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+      {/* Scores */}
+      <section className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+        <ScoreCard title="Overall Score" value={health?.overall ?? '--'} big />
+        <ScoreCard title="Compliance" value={health?.complianceScore ?? '--'} />
+        <ScoreCard title="Surveillance" value={health?.surveillanceScore ?? '--'} />
+        <ScoreCard title="Business" value={health?.businessScore ?? '--'} />
+      </section>
+
+      {/* Heatmap */}
+      <section className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>14-Day Risk Heatmap</h3>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>low / med / high</div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        <div className="heat" style={{ marginTop: 12 }}>
+          {(health?.heatmap || []).map((v, i) => {
+            const cls = v === 0 ? 'l' : v === 1 ? 'm' : 'h';
+            return (
+              <div
+                key={i}
+                className={`cell ${cls}`}
+                title={`Day ${i + 1}: ${['Low', 'Medium', 'High'][v]}`}
+              />
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Tasks */}
+      <section className="card">
+        <h3 style={{ marginTop: 0 }}>Compliance Tasks</h3>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+          <span className="badge low">Completed: {counts.completed}</span>
+          <span className="badge med">Pending: {counts.pending}</span>
+          <span className="badge high">Overdue: {counts.overdue}</span>
+        </div>
+
+        <div style={{ width: '100%', overflowX: 'auto' }}>
+          <table className="table" style={{ minWidth: 720 }}>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Due</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((t) => (
+                <tr key={t.id}>
+                  <td>{t.title}</td>
+                  <td>{t.category}</td>
+                  <td>{new Date(t.due).toDateString()}</td>
+                  <td>
+                    <span
+                      className={`badge ${
+                        t.status === 'OVERDUE' ? 'high' : t.status === 'PENDING' ? 'med' : 'low'
+                      }`}
+                    >
+                      {t.status}
+                    </span>
+                  </td>
+                  <td>
+                    <button className="btn" onClick={() => toggleTask(t.id, t.status)}>
+                      {t.status === 'COMPLETED' ? 'Mark Pending' : 'Mark Done'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {tasks.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ color: 'var(--muted)', paddingTop: 12 }}>
+                    No tasks yet — click “Seed Sample Data”.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Trades */}
+      <section className="card">
+        <h3 style={{ marginTop: 0 }}>Client Trades & Flags</h3>
+
+        <div style={{ width: '100%', overflowX: 'auto' }}>
+          <table className="table" style={{ minWidth: 880 }}>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Client</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trades.slice(-100).map((t) => {
+                const myFlags = flags.filter((f) => f.tradeId === t.id);
+                const sev = myFlags.some((f) => f.severity === 'HIGH')
+                  ? 'high'
+                  : myFlags.some((f) => f.severity === 'MEDIUM')
+                  ? 'med'
+                  : 'low';
+                const flagged = myFlags.length > 0;
+
+                return (
+                  <tr
+                    key={t.id}
+                    style={{
+                      background: flagged
+                        ? sev === 'high'
+                          ? '#2a1113'
+                          : sev === 'med'
+                          ? '#2a2213'
+                          : '#10231a'
+                        : 'transparent',
+                    }}
+                  >
+                    <td>{new Date(t.ts).toLocaleString()}</td>
+                    <td>{t.clientId}</td>
+                    <td>{t.symbol}</td>
+                    <td>{t.side}</td>
+                    <td>{t.qty}</td>
+                    <td>{t.price}</td>
+                    <td>
+                      {myFlags.map((f, i) => (
+                        <span key={i} className={`badge ${sev}`} style={{ marginRight: 6 }}>
+                          {f.type}
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                );
+              })}
+              {trades.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ color: 'var(--muted)', paddingTop: 12 }}>
+                    No trades yet — click “Seed Sample Data”.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {loading && <div className="card">Loading…</div>}
+    </div>
+  );
+}
+
+function ScoreCard({ title, value, big = false }: { title: string; value: number | string; big?: boolean }) {
+  return (
+    <div className="card">
+      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{title}</div>
+      <div style={{ fontSize: big ? 36 : 28, fontWeight: 800 }}>{value}</div>
     </div>
   );
 }
