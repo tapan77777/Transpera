@@ -57,19 +57,19 @@ export async function GET() {
       doc.fontSize(12).text(`- [${f.severity}] ${f.type}: ${f.message}`);
     });
 
-    // finalize the PDF (this triggers the stream 'end'/'finish' events)
     doc.end();
+const pdfBuffer = await finished;
 
-    // wait until all chunks are collected
-    const pdfBuffer = await finished;
+// convert to Uint8Array and return Response
+const pdfUint8 = new Uint8Array(pdfBuffer);
+return new Response(pdfUint8, {
+  status: 200,
+  headers: {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': 'attachment; filename="transpera_compliance_report.pdf"',
+  },
+});
 
-    return new NextResponse(pdfBuffer, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': 'attachment; filename="transpera_compliance_report.pdf"',
-      },
-    });
   } catch (err) {
     // log the error to server console for debugging
     // Next.js dev terminal will show this
